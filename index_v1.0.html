@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>vid2bin – video to frame animation for tiny displays</title>
+<style>
+:root{--bg:#161a28;--panel:#1e2335;--line:#2e3550;--ink:#e6e9f5;--mute:#8d96b8;--acc:#8b9bff;--ok:#5fd4a0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,"Segoe UI",sans-serif}
+main{display:grid;grid-template-columns:330px 1fr;gap:20px;max-width:1240px;margin:0 auto;padding:24px}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+h1{font-size:24px;margin:0 0 2px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+h2{font-size:13px;margin:0 0 8px;color:var(--mute);font-weight:600}
+label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0}
+input[type=number],select{width:130px;background:#141829;border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:6px 8px;font:inherit}
+input[type=range]{accent-color:var(--acc);width:100%}
+input[type=file]{width:100%;color:var(--mute)}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:var(--acc);color:#10142a}
+button.alt{background:#2a3150;color:var(--ink)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.stage{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:700px){.stage{grid-template-columns:1fr}}
+figure{margin:0}
+figcaption{color:var(--mute);margin-bottom:6px}
+.view{position:relative;background:#0b0e18;border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:140px;display:grid;place-items:center}
+#box{cursor:crosshair;touch-action:none;user-select:none}
+video{display:block;width:100%;height:auto}
+#sel{position:absolute;border:2px solid var(--acc);box-shadow:0 0 0 9999px rgba(8,10,20,.62);pointer-events:none}
+canvas#cv{width:100%;image-rendering:pixelated;background:#000;display:block}
+#info{margin:12px 0;color:var(--mute)}
+progress{width:100%;height:8px;accent-color:var(--ok)}
+
+section{position:sticky;top:16px;align-self:start}
+@media(max-width:860px){section{position:static}}
+.hint{color:var(--mute);margin:6px 0 8px;font-size:13px}
+label input[type=range]{width:150px}
+#sel{pointer-events:auto;cursor:move}
+#sel i{position:absolute;width:14px;height:14px;background:var(--acc);border:2px solid var(--bg);border-radius:4px}
+#sel i[data-c=tl]{left:-7px;top:-7px;cursor:nwse-resize}#sel i[data-c=br]{right:-7px;bottom:-7px;cursor:nwse-resize}
+#sel i[data-c=tr]{right:-7px;top:-7px;cursor:nesw-resize}#sel i[data-c=bl]{left:-7px;bottom:-7px;cursor:nesw-resize}
+.player{display:flex;align-items:center;gap:12px;margin-top:12px}
+.player label{flex:1;margin:0}
+#play{min-width:88px;border-radius:999px}
+#tc{min-width:96px;text-align:right;color:var(--mute);font-variant-numeric:tabular-nums}
+.pb{height:6px;background:#2a3150;border-radius:3px;margin-top:12px;overflow:hidden}
+.pb i{display:block;height:100%;width:0;background:var(--ok)}
+aside[inert]{opacity:.5}
+</style></head><body><main>
+<aside>
+  <h1>vid2bin</h1><p class="sub">Video in. Frame-perfect .bin or Arduino code out.</p>
+  <div class="panel"><h2>Video</h2><input type="file" id="file" accept="video/*"></div>
+  <div class="panel"><h2>Clip</h2>
+    <label>Start (s)<input type="number" id="t0" value="0" min="0" step="0.1"></label>
+    <label>End (s)<input type="number" id="t1" value="0" min="0" step="0.1"></label>
+    <label>Capture FPS<input type="number" id="fps" value="10" min="1" max="60"></label>
+    <p class="hint">Frames taken per second of video. More frames means a bigger file.</p></div>
+  <div class="panel"><h2>Display and crop</h2>
+    <label>Display<select id="preset"><option value="">Custom</option><option>128x64</option><option>128x32</option><option>128x128</option><option>84x48</option><option>64x48</option><option>200x200</option><option>250x122</option><option>296x128</option></select></label>
+    <label>Width<input type="number" id="w" value="128" min="8"></label>
+    <label>Height<input type="number" id="h" value="64" min="8"></label>
+    <label>Lock crop to display shape<input type="checkbox" id="lock" checked></label>
+    <p class="hint">Drag the box to move it, pull a corner to resize, scroll to zoom. Drag outside it to draw a new one.</p>
+    <button class="alt" id="reset">Reset crop</button></div>
+  <div class="panel"><h2>Picture</h2>
+    <label>Method<select id="dm"><option value="k">Atkinson dither</option><option value="f">Floyd–Steinberg dither</option><option value="b">Ordered dither (steady)</option><option value="a">Adaptive threshold</option><option value="t">Plain threshold</option></select></label>
+    <label>Threshold<input type="range" id="th" min="0" max="255" value="128"></label>
+    <label>Brightness<input type="range" id="bri" min="-100" max="100" value="0"></label>
+    <label>Contrast<input type="range" id="con" min="-100" max="100" value="0"></label>
+    <label>Sharpen<input type="range" id="sha" min="0" max="3" step="0.1" value="0.8"></label>
+    <label>Auto levels<input type="checkbox" id="auto" checked></label>
+    <label>Invert<input type="checkbox" id="invert"></label>
+    <label>Byte layout<select id="mode"><option value="h">Horizontal</option><option value="v">Vertical (SSD1306)</option></select></label></div>
+</aside>
+<section>
+  <div class="stage">
+    <figure><figcaption>Source</figcaption><div class="view" id="box"><video id="v" muted playsinline></video><div id="sel"><i data-c="tl"></i><i data-c="tr"></i><i data-c="bl"></i><i data-c="br"></i></div></div></figure>
+    <figure><figcaption>Result</figcaption><div class="view"><canvas id="cv" width="128" height="64"></canvas></div></figure>
+  </div>
+  <div class="player"><button id="play" disabled>Play</button><input type="range" id="scrub" min="0" max="1" step="0.01" value="0" aria-label="Position"><span id="tc">0.00 s</span></div>
+  <div class="player"><label>Playback FPS<input type="range" id="pfps" min="1" max="60" value="10"><b id="pfv">10</b></label></div>
+  <div id="info">Choose a video to begin.</div>
+  <div class="row"><button id="go" disabled>Convert to frames</button><button id="dlbin" class="alt" disabled>Download .bin</button><button id="dlcode" class="alt" disabled>Download Arduino .h</button></div>
+  <div class="pb"><i id="pi"></i></div>
+</section></main>
+<script>
+const $=id=>document.getElementById(id), v=$('v'), cv=$('cv'), cx=cv.getContext('2d'), sc=document.createElement('canvas'), sx=sc.getContext('2d',{willReadFrequently:true});
+const S={};['t0','t1','fps','pfps','w','h','lock','th','bri','con','sha','auto','invert','dm','mode','preset'].forEach(k=>S[k]=$(k));
+let crop={x:0,y:0,w:1,h:1},frames=[],timer=null,drag=null,playing=false,raf=0;
+const clamp=(n,a,b)=>Math.min(b,Math.max(a,n)), box=$('box'), sel=$('sel');
+
+// ---- load ----
+function load(f){ if(!f) return; pause(); frames=[]; v.src=URL.createObjectURL(f);
+  v.onloadedmetadata=()=>{ S.t0.value=0; S.t1.value=v.duration.toFixed(2); $('scrub').max=v.duration; crop={x:0,y:0,w:1,h:1}; fitCrop(); drawCrop(); $('go').disabled=$('play').disabled=false; seek(0).then(upd); }; }
+$('file').onchange=e=>load(e.target.files[0]);
+document.body.ondragover=e=>e.preventDefault();
+document.body.ondrop=e=>{e.preventDefault(); load(e.dataTransfer.files[0]);};
+const seek=t=>new Promise(r=>{ if(Math.abs(v.currentTime-t)<.001) return r(); const d=()=>{v.onseeked=null;r()}; v.onseeked=d; setTimeout(d,2000); v.currentTime=Math.min(t,v.duration||t); });
+// keep the crop box the same shape as the display, around its current centre
+function fitCrop(){ if(!S.lock.checked||!v.videoWidth) return; const r=+S.w.value/+S.h.value, vr=v.videoWidth/v.videoHeight, cx=crop.x+crop.w/2, cy=crop.y+crop.h/2;
+  let w=crop.w, h=w*vr/r; if(h>1){h=1;w=r/vr} if(w>1){w=1;h=vr/r}
+  crop={x:clamp(cx-w/2,0,1-w),y:clamp(cy-h/2,0,1-h),w,h}; drawCrop(); }
+function drawCrop(){ const t=sel.style; t.left=crop.x*100+'%'; t.top=crop.y*100+'%'; t.width=crop.w*100+'%'; t.height=crop.h*100+'%'; }
+
+// ---- frame -> 1-bit pixels (0/1 per pixel) ----
+const BAYER=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+const K={f:[[1,0,7/16],[-1,1,3/16],[0,1,5/16],[1,1,1/16]],k:[[1,0,.125],[2,0,.125],[-1,1,.125],[0,1,.125],[1,1,.125],[0,2,.125]]};
+function grab(){ const W=+S.w.value, H=+S.h.value, vw=v.videoWidth, vh=v.videoHeight, rw=Math.max(1,Math.round(crop.w*vw)), rh=Math.max(1,Math.round(crop.h*vh));
+  sc.width=rw; sc.height=rh; sx.drawImage(v,crop.x*vw,crop.y*vh,crop.w*vw,crop.h*vh,0,0,rw,rh);
+  const d=sx.getImageData(0,0,rw,rh).data, g=new Float32Array(W*H);
+  // area-average downscale: every source pixel counts, so thin lines survive at low res
+  for(let y=0;y<H;y++){ const y0=Math.floor(y*rh/H), y1=Math.max(y0+1,Math.floor((y+1)*rh/H));
+    for(let x=0;x<W;x++){ const x0=Math.floor(x*rw/W), x1=Math.max(x0+1,Math.floor((x+1)*rw/W)); let t=0;
+      for(let j=y0;j<y1;j++) for(let i=x0;i<x1;i++){ const p=(j*rw+i)*4; t+=.299*d[p]+.587*d[p+1]+.114*d[p+2]; }
+      g[y*W+x]=t/((y1-y0)*(x1-x0)); } }
+  let lo=0, hi=255;
+  if(S.auto.checked){ const hs=new Uint32Array(256); g.forEach(a=>hs[a|0]++); const n=W*H; let c=0;
+    for(lo=0;lo<255&&(c+=hs[lo])<n*.02;lo++); c=0; for(hi=255;hi>0&&(c+=hs[hi])<n*.02;hi--); if(hi-lo<16){lo=0;hi=255;} }
+  const ct=(100+ +S.con.value)/100, br=+S.bri.value*1.28, k2=255/(hi-lo);
+  for(let i=0;i<g.length;i++) g[i]=clamp(((g[i]-lo)*k2-128)*ct+128+br,0,255);
+  const am=+S.sha.value;
+  if(am>0){ const o=g.slice(); for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){ const i=y*W+x, q=(o[i-W-1]+o[i-W]+o[i-W+1]+o[i-1]+o[i]+o[i+1]+o[i+W-1]+o[i+W]+o[i+W+1])/9; g[i]=clamp(o[i]+am*(o[i]-q),0,255); } }
+  const out=new Uint8Array(W*H), th=+S.th.value, m=S.dm.value, inv=S.invert.checked?1:0; let mean;
+  if(m==='a'){ const r=Math.max(2,Math.round(Math.min(W,H)/12)), I=new Float64Array((W+1)*(H+1)), S1=W+1; mean=new Float32Array(W*H);
+    for(let y=0;y<H;y++){ let t=0; for(let x=0;x<W;x++){ t+=g[y*W+x]; I[(y+1)*S1+x+1]=I[y*S1+x+1]+t; } }
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const x0=Math.max(0,x-r), x1=Math.min(W,x+r+1), y0=Math.max(0,y-r), y1=Math.min(H,y+r+1);
+      mean[y*W+x]=(I[y1*S1+x1]-I[y0*S1+x1]-I[y1*S1+x0]+I[y0*S1+x0])/((x1-x0)*(y1-y0)); } }
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=y*W+x, o=g[i]; let n;
+    if(m==='a') n=o>=mean[i]+(th-128)*.4-4; else if(m==='b') n=o>=(BAYER[(y&3)*4+(x&3)]+.5)*16+(th-128); else n=o>=th;
+    if(K[m]){ const e=o-(n?255:0); for(const [dx,dy,w] of K[m]){ const xx=x+dx, yy=y+dy; if(xx>=0&&xx<W&&yy<H) g[yy*W+xx]+=e*w; } }
+    out[i]=(n?1:0)^inv; }
+  return out; }
+function show(px){ const W=+S.w.value, H=+S.h.value; if(cv.width!==W||cv.height!==H){cv.width=W;cv.height=H;}
+  const im=cx.createImageData(W,H); for(let i=0;i<W*H;i++){ const c=px[i]?255:0; im.data.set([c,c,c,255],i*4); } cx.putImageData(im,0,0); }
+
+// ---- pack bits ----
+function pack(px,W,H,mode){ let o;
+  if(mode==='h'){ const bw=Math.ceil(W/8); o=new Uint8Array(bw*H); for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(px[y*W+x]) o[y*bw+(x>>3)]|=128>>(x&7); }
+  else { o=new Uint8Array(Math.ceil(H/8)*W); for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(px[y*W+x]) o[(y>>3)*W+x]|=1<<(y&7); }
+  return o; }
+const packAll=()=>frames.map(f=>pack(f,+S.w.value,+S.h.value,S.mode.value));
+
+// ---- playback ----
+function tc(k){ $('tc').textContent=frames.length?`frame ${k+1}/${frames.length}`:`${v.currentTime.toFixed(2)} s`; }
+function pause(){ playing=false; clearInterval(timer); cancelAnimationFrame(raf); v.pause(); $('play').textContent='Play'; }
+function play(){ if(!v.videoWidth) return; playing=true; $('play').textContent='Pause';
+  if(frames.length){ let k=+$('scrub').value|0; timer=setInterval(()=>{ k=(k+1)%frames.length; show(frames[k]); $('scrub').value=k; tc(k); },1000/+S.pfps.value); }
+  else { if(v.currentTime<+S.t0.value||v.currentTime>=+S.t1.value-.05) v.currentTime=+S.t0.value; v.play();
+    const tick=()=>{ if(!playing) return; if(v.currentTime>=+S.t1.value) v.currentTime=+S.t0.value; show(grab()); $('scrub').value=v.currentTime; tc(); raf=requestAnimationFrame(tick); }; tick(); } }
+$('play').onclick=()=>playing?pause():play();
+$('scrub').oninput=async e=>{ const x=+e.target.value; pause(); if(frames.length){ show(frames[x|0]); tc(x|0); } else { await seek(x); show(grab()); tc(); } };
+
+// ---- settings: any change drops converted frames so exports can never be stale ----
+function info(){ const W=+S.w.value, H=+S.h.value, n=Math.max(0,Math.floor((S.t1.value-S.t0.value)*S.fps.value)), b=S.mode.value==='h'?Math.ceil(W/8)*H:Math.ceil(H/8)*W;
+  $('info').textContent=`${n} frames · ${W}×${H} · ${b} bytes/frame · ${(n*b/1024).toFixed(1)} KB total`; }
+function upd(){ pause(); if(frames.length){ frames=[]; $('dlbin').disabled=$('dlcode').disabled=true; $('scrub').max=v.duration; $('scrub').step=.01; }
+  if(v.videoWidth){ show(grab()); tc(); } info(); }
+S.w.oninput=S.h.oninput=()=>{ fitCrop(); upd(); };
+['t0','t1','lock','dm','th','bri','con','sha','auto','invert'].forEach(k=>S[k].oninput=()=>{ if(k==='lock') fitCrop(); upd(); });
+S.fps.oninput=()=>{ S.pfps.value=S.fps.value; $('pfv').textContent=S.fps.value; upd(); };
+S.pfps.oninput=()=>{ $('pfv').textContent=S.pfps.value; if(playing&&frames.length){ pause(); play(); } };
+S.mode.oninput=info;
+S.preset.onchange=()=>{ if(!S.preset.value) return; [S.w.value,S.h.value]=S.preset.value.split('x'); fitCrop(); upd(); };
+$('reset').onclick=()=>{ crop={x:0,y:0,w:1,h:1}; fitCrop(); drawCrop(); upd(); };
+
+// ---- crop box: move, resize by corner, draw new, wheel zoom ----
+const pt=e=>{ const r=v.getBoundingClientRect(); return [clamp((e.clientX-r.left)/r.width,0,1), clamp((e.clientY-r.top)/r.height,0,1)]; };
+box.onpointerdown=e=>{ if(!v.videoWidth) return; const p=pt(e), c=e.target.dataset.c;
+  if(c) drag={m:'r',a:[c[1]==='l'?crop.x+crop.w:crop.x, c[0]==='t'?crop.y+crop.h:crop.y]};
+  else if(e.target===sel) drag={m:'m',o:[p[0]-crop.x,p[1]-crop.y]};
+  else drag={m:'r',a:p};
+  box.setPointerCapture(e.pointerId); };
+box.onpointermove=e=>{ if(!drag) return; const p=pt(e);
+  if(drag.m==='m') crop={...crop,x:clamp(p[0]-drag.o[0],0,1-crop.w),y:clamp(p[1]-drag.o[1],0,1-crop.h)};
+  else { const [ax,ay]=drag.a, sx_=p[0]>=ax?1:-1, sy=p[1]>=ay?1:-1, k=(+S.w.value/+S.h.value)/(v.videoWidth/v.videoHeight), mw=sx_>0?1-ax:ax, mh=sy>0?1-ay:ay;
+    let w=Math.abs(p[0]-ax), h=Math.abs(p[1]-ay);
+    if(S.lock.checked){ w=Math.min(w,mw,mh*k); h=w/k; } else { w=Math.min(w,mw); h=Math.min(h,mh); }
+    w=Math.max(w,.03); h=Math.max(h,.03); crop={x:sx_>0?ax:ax-w,y:sy>0?ay:ay-h,w,h}; }
+  drawCrop(); upd(); };
+box.onpointerup=()=>{drag=null;};
+box.onwheel=e=>{ if(!v.videoWidth) return; e.preventDefault(); const f=e.deltaY>0?1.06:.94, cx0=crop.x+crop.w/2, cy0=crop.y+crop.h/2;
+  let w=crop.w*f, h=crop.h*f; const k=Math.min(1,1/w,1/h); w=clamp(w*k,.03,1); h=clamp(h*k,.03,1);
+  crop={x:clamp(cx0-w/2,0,1-w),y:clamp(cy0-h/2,0,1-h),w,h}; drawCrop(); upd(); };
+
+// ---- convert: strictly sequential, F[i] is always the i-th timestamp ----
+$('go').onclick=async()=>{ pause(); const fps=+S.fps.value, t0=+S.t0.value, n=Math.floor((S.t1.value-t0)*fps);
+  if(n<1) return alert('Nothing to convert: the end time must be later than the start time.');
+  $('go').disabled=true; document.querySelector('aside').inert=true; const F=new Array(n);
+  for(let i=0;i<n;i++){ await seek(t0+i/fps); F[i]=grab(); show(F[i]); $('pi').style.width=(i+1)/n*100+'%'; }
+  frames=F; document.querySelector('aside').inert=false; $('go').disabled=false; $('dlbin').disabled=$('dlcode').disabled=false;
+  $('scrub').max=n-1; $('scrub').step=1; $('scrub').value=0; info(); play(); };
+
+// ---- export ----
+function save(parts,name,type){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(parts,{type})); a.download=name; a.click(); }
+$('dlbin').onclick=()=>save(packAll(),'animation.bin','application/octet-stream');
+$('dlcode').onclick=()=>{ const W=+S.w.value, H=+S.h.value, n=frames.length, p=packAll(), names=[];
+  let s=`// ${W}x${H}, ${n} frames, ${S.pfps.value} fps, ${S.mode.value==='h'?'horizontal':'vertical (SSD1306 pages)'} 1 bit per pixel, ${p[0].length} bytes per frame\n// On AVR read with pgm_read_byte / pgm_read_ptr.\n\n`;
+  p.forEach((b,i)=>{ const nm='frame_'+String(i).padStart(4,'0'); names.push(nm); const L=[];
+    for(let k=0;k<b.length;k+=16) L.push('  '+Array.from(b.subarray(k,k+16),x=>'0x'+x.toString(16).padStart(2,'0')).join(', '));
+    s+=`const unsigned char ${nm}[] PROGMEM = {\n${L.join(',\n')}\n};\n`; });
+  s+=`\nconst int FRAME_COUNT = ${n};\nconst int FRAME_FPS = ${S.pfps.value};\nconst unsigned char* const frames[FRAME_COUNT] PROGMEM = {\n  ${names.join(',\n  ')}\n};\n`;
+  save([s],'animation.h','text/plain'); };
+</script></body></html>
